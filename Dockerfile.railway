@@ -1,0 +1,39 @@
+# Builds Libredesk from source (frontend + backend + stuffed static assets), mirroring `make build`.
+# The upstream Dockerfile expects a prebuilt `libredesk` binary from goreleaser, which doesn't
+# exist when Railway builds straight from this repo. railway.toml points Railway at this file.
+
+# --- Frontend ---
+FROM node:20-alpine AS frontend
+RUN corepack enable
+WORKDIR /src/frontend
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY frontend/ ./
+# vite.config.js reads a few assets from ../static
+COPY static/ /src/static/
+ARG LIBREDESK_VERSION=v0.0.0
+ENV VITE_APP_VERSION=${LIBREDESK_VERSION}
+RUN pnpm build:main && pnpm build:widget
+
+# --- Backend ---
+FROM golang:1.25-alpine AS backend
+WORKDIR /src
+RUN go install github.com/knadh/stuffbin/...@v1.3.0
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=frontend /src/frontend/dist frontend/dist
+ARG LIBREDESK_VERSION=v0.0.0
+RUN CGO_ENABLED=0 go build \
+    -ldflags="-X 'main.buildString=${LIBREDESK_VERSION}' -X 'main.versionString=${LIBREDESK_VERSION}' -X 'github.com/abhinavxd/libredesk/internal/version.Version=${LIBREDESK_VERSION}' -s -w" \
+    -o libredesk ./cmd \
+  && stuffbin -a stuff -in libredesk -out libredesk frontend/dist i18n schema.sql static
+
+# --- Runtime (same as the upstream Dockerfile) ---
+FROM alpine:3.18
+RUN apk --no-cache add ca-certificates tzdata
+WORKDIR /libredesk
+COPY --from=backend /src/libredesk .
+COPY config.sample.toml config.toml
+EXPOSE 9000
+CMD ["./libredesk"]

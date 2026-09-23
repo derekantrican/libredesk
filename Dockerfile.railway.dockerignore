@@ -1,0 +1,10 @@
+# Only applies to Dockerfile.railway (the upstream Dockerfile needs the prebuilt binary).
+.git
+**/node_modules
+frontend/dist
+libredesk
+libredesk.exe
+libredesk.bin
+uploads
+config.toml
+.env
